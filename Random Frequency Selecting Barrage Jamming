@@ -1,0 +1,213 @@
+import sys
+import signal
+from PyQt5 import Qt
+from argparse import ArgumentParser
+from packaging.version import Version as StrictVersion
+from gnuradio import qtgui
+from gnuradio import analog
+from gnuradio import filter
+from gnuradio.filter import firdes
+from gnuradio import gr
+from gnuradio.fft import window
+from gnuradio import iio
+from gnuradio.qtgui import Range, RangeWidget
+from PyQt5 import QtCore
+import sip
+import random
+
+class Barrage24(gr.top_block, Qt.QWidget):
+
+    def __init__(self, BW=15000000, samp_rate=20000000, 
+    uri='ip:pluto.local', freq=2420000000):
+        gr.top_block.__init__(self, "Barrage24", catch_exceptions=True)
+        Qt.QWidget.__init__(self)
+        self.setWindowTitle("Barrage24")
+        qtgui.util.check_set_qss()
+        try:
+            self.setWindowIcon(Qt.QIcon.fromTheme('gnuradio-grc'))
+        except BaseException as exc:
+            print(f"Qt GUI: Could not set Icon: {str(exc)}", file=sys.stderr)
+        self.top_scroll_layout = Qt.QVBoxLayout()
+        self.setLayout(self.top_scroll_layout)
+        self.top_scroll = Qt.QScrollArea()
+        self.top_scroll.setFrameStyle(Qt.QFrame.NoFrame)
+        self.top_scroll_layout.addWidget(self.top_scroll)
+        self.top_scroll.setWidgetResizable(True)
+        self.top_widget = Qt.QWidget()
+        self.top_scroll.setWidget(self.top_widget)
+        self.top_layout = Qt.QVBoxLayout(self.top_widget)
+        self.top_grid_layout = Qt.QGridLayout()
+        self.top_layout.addLayout(self.top_grid_layout)
+        self.settings = Qt.QSettings("GNU Radio", "Barrage24")
+
+        try:
+            if StrictVersion(Qt.qVersion())
+            < StrictVersion("5.0.0"):
+                self.restoreGeometry(self.settings.value
+                ("geometry").toByteArray())
+            else:
+                self.restoreGeometry(self.settings.value("geometry"))
+        except BaseException as exc:
+            print(f"Qt GUI: Could not restore geometry: {str(exc)}",
+            file=sys.stderr)
+        ##################################################
+        # Parameters
+        ##################################################
+        self.BW = BW
+        self.samp_rate = samp_rate
+        self.uri = uri
+        self.freq = freq
+        ##################################################
+        # Variables
+        ##################################################
+        self.attenuation = attenuation = 0
+        ##################################################
+        # Blocks
+        ##################################################
+        self._attenuation_range = Range(-40, 10, 1, 10, 200)
+        self._attenuation_win = RangeWidget(self._attenuation_range,
+        self.set_attenuation, 
+        "'attenuation'", "counter_slider", float, QtCore.Qt.Horizontal)
+        self.top_layout.addWidget(self._attenuation_win)
+        self.qtgui_sink_x_0_0 = qtgui.sink_c(
+            1024, # fftsize
+            window.WIN_BLACKMAN_hARRIS, # wintype
+            self.freq, # fc
+            BW, # bw
+            'Emission', # name
+            True, # plotfreq
+            True, # plotwaterfall
+            True, # plottime
+            True, # plotconst
+            None # parent
+        )
+        self.qtgui_sink_x_0_0.set_update_time(1.0/10)
+        self._qtgui_sink_x_0_0_win = sip.wrapinstance
+        (self.qtgui_sink_x_0_0.qwidget(), Qt.QWidget)
+        self.qtgui_sink_x_0_0.enable_rf_freq(False)
+        self.top_layout.addWidget(self._qtgui_sink_x_0_0_win)
+        self.low_pass_filter_0 = filter.fir_filter_ccf(
+            1,
+            firdes.low_pass(
+                1,
+                samp_rate,
+                (samp_rate/3),
+                (samp_rate/12),
+                window.WIN_HAMMING,
+                6.76))
+        self.iio_pluto_sink_0 = iio.fmcomms2_sink_fc32(uri if uri 
+        else iio.get_pluto_uri(), [True, True], 32768, False)
+        self.iio_pluto_sink_0.set_len_tag_key('')
+        self.iio_pluto_sink_0.set_bandwidth(BW)
+        self.iio_pluto_sink_0.set_frequency(self.freq)
+        self.iio_pluto_sink_0.set_samplerate(samp_rate)
+        self.iio_pluto_sink_0.set_attenuation(0, attenuation)
+        self.iio_pluto_sink_0.set_filter_params('Auto', '', 0, 0)
+        self.analog_noise_source_x_0 = analog.noise_source_c
+        (analog.GR_GAUSSIAN, 1, 0)
+        ##################################################
+        # Connections
+        ##################################################
+        self.connect((self.analog_noise_source_x_0, 0),
+        (self.low_pass_filter_0, 0))
+        self.connect((self.low_pass_filter_0, 0), (self.iio_pluto_sink_0, 0))
+        self.connect((self.low_pass_filter_0, 0), (self.qtgui_sink_x_0_0, 0))
+
+    def closeEvent(self, event):
+        self.settings = Qt.QSettings("GNU Radio", "Barrage24")
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.stop()
+        self.wait()
+        event.accept()
+
+    def get_BW(self):
+        return self.BW
+
+    def set_BW(self, BW):
+        self.BW = BW
+        self.iio_pluto_sink_0.set_bandwidth(self.BW)
+        self.qtgui_sink_x_0_0.set_frequency_range(self.freq, self.BW)
+
+    def get_samp_rate(self):
+        return self.samp_rate
+
+    def set_samp_rate(self, samp_rate):
+        self.samp_rate = samp_rate
+        self.iio_pluto_sink_0.set_samplerate(self.samp_rate)
+        self.low_pass_filter_0.set_taps(firdes.low_pass
+        (1, self.samp_rate, (self.samp_rate/3), (self.samp_rate/12), 
+        m window.WIN_HAMMING, 6.76))
+
+    def get_uri(self):
+        return self.uri
+
+    def set_uri(self, uri):
+        self.uri = uri
+
+    def get_freq(self):
+        return self.freq
+
+    def set_freq(self, freq):
+        self.freq = freq
+        self.iio_pluto_sink_0.set_frequency(self.freq)
+        self.qtgui_sink_x_0_0.set_frequency_range(self.freq, self.BW)
+
+    def get_attenuation(self):
+        return self.attenuation
+
+    def set_attenuation(self, attenuation):
+        self.attenuation = attenuation
+        self.iio_pluto_sink_0.set_attenuation(0,self.attenuation)
+
+def argument_parser():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--uri", dest="uri", type=str, default='ip:pluto.local',
+        help="Set URI [default=%(default)r]")
+    return parser
+
+def main(top_block_cls=Barrage24, options=None):
+    if options is None:
+        options = argument_parser().parse_args()
+
+    if StrictVersion("4.5.0") <= StrictVersion(Qt.qVersion()) < 
+    StrictVersion("5.0.0"):
+        style = gr.prefs().get_string('qtgui', 'style', 'raster')
+        Qt.QApplication.setGraphicsSystem(style)
+    qapp = Qt.QApplication(sys.argv)
+    center_freqs = [2410000000, 2425000000, 2440000000, 2455000000, 
+    2470000000]
+    bandwidth = 20000000
+    # Create an instance of Barrage24
+    tb = top_block_cls(uri=options.uri, freq=center_freqs[0], BW=bandwidth)
+    tb.start()
+    tb.show()
+
+    def update_frequency():
+        freq = random.choice(center_freqs)
+        lower_freq = freq - bandwidth / 2
+        upper_freq = freq + bandwidth / 2
+        tb.set_freq(freq)
+        print(f"Processing frequency: {freq} Hz")
+        print(f"Processing frequency range: {lower_freq} Hz - 
+        {upper_freq} Hz")
+
+    # Set up a timer to call update_frequency at regular intervals
+    timer = QtCore.QTimer()
+    timer.timeout.connect(update_frequency)
+    timer.start(5000)  # Change frequency every 10000 ms (10 seconds)
+
+
+    def sig_handler(sig=None, frame=None):
+        tb.stop()
+        tb.wait()
+        qapp.quit()
+
+    signal.signal(signal.SIGINT, sig_handler)
+    signal.signal(signal.SIGTERM, sig_handler)
+
+    # Run the Qt event loop
+    qapp.exec_()
+
+if __name__ == '__main__':
+    main()
